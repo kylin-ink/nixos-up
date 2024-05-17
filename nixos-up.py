@@ -163,10 +163,10 @@ if efi:
   # EFI: The first partition is boot and the second is the root partition.
   # This occasionally fails with "unable to open /dev/"
   run(["mkfs.fat", "-F", "32", "-n", "boot", f"/dev/{partition_name(selected_disk_name, 1)}"])
-  run(["mkfs.ext4", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 2)}"])
+  run(["mkfs.btrfs", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 2)}"])
 else:
   # MBR: The first partition is the root partition and there's no boot partition.
-  run(["mkfs.ext4", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 1)}"])
+  run(["mkfs.btrfs", "-L", "nixos", f"/dev/{partition_name(selected_disk_name, 1)}"])
 
 ### Mounting
 # Sometimes when switching between BIOS/UEFI, we need to force the kernel to
