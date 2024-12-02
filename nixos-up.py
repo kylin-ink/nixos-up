@@ -13,6 +13,9 @@ import requests
 if os.geteuid() != 0:
   sys.exit("nixos-up must be run as root!")
 
+nixos_version = os.environ["NIXOS_VERSION"][:5]
+print(f"Detected NixOS version {nixos_version}")
+
 if subprocess.run(["mountpoint", "/mnt"]).returncode == 0:
   sys.exit("Something is already mounted at /mnt!")
 
@@ -32,11 +35,11 @@ def maybe_read_first_line(path: Path) -> str:
   return ""
 
 print("\nDetected the following disks:\n")
-for i, name in enumerate(disks):
+for diskno, name in enumerate(disks, start=1):
   vendor = maybe_read_first_line(sys_block / name / "device" / "vendor")
   model = maybe_read_first_line(sys_block / name / "device" / "model")
   size_gb = float(disk_size_kb(name)) / 1024 / 1024
-  print(f"{i + 1}: /dev/{name:12} {vendor:12} {model:32} {size_gb:.3f} Gb total")
+  print(f"{diskno}: /dev/{name:12} {vendor:12} {model:32} {size_gb:.3f} Gb total")
 print()
 
 def ask_disk() -> int:
@@ -215,16 +218,17 @@ config = """\
 """ + config
 
 # home-manager
-config = re.sub(r"{ config, pkgs, \.\.\. }:\s+{", f"""\
-{{ config, pkgs, ...}}:
+config = re.sub(r"({ config(, lib)?, pkgs, \.\.\. }):\s+{", f"""\
+\\1:
 
 let
-  home-manager = fetchTarball "https://github.com/nix-community/home-manager/archive/release-21.05.tar.gz";
+  home-manager = fetchTarball "https://github.com/nix-community/home-manager/archive/release-{nixos_version}.tar.gz";
 in
 {{
   # Your home-manager configuration! Check out https://rycee.gitlab.io/home-manager/ for all possible options.
   home-manager.users.{username} = {{ pkgs, ... }}: {{
     home.packages = with pkgs; [ hello ];
+    home.stateVersion = "{nixos_version}";
     programs.starship.enable = true;
   }};
 """, config)
@@ -235,14 +239,14 @@ if not efi:
   config = config.replace("boot.loader.grub.version = 2;", f"boot.loader.grub.version = 2;\n  boot.loader.grub.device = \"/dev/{selected_disk_name}\";\n")
 
 # Declarative user management
-# Using `passwordFile` is a little bit more secure than `hashedPassword` since
+# Using `hashedPasswordFile` is a little bit more secure than `hashedPassword` since
 # it avoids putting hashed passwords into the world-readable nix store. See
 # https://discourse.nixos.org/t/introducing-nixos-up-a-dead-simple-installer-for-nixos/12350/11?u=samuela *)
 hashed_password = subprocess.run(["mkpasswd", "--method=sha-512", password], check=True, capture_output=True, text=True).stdout.strip()
-password_file_path = f"/mnt/etc/passwordFile-{username}"
-with open(password_file_path, "w") as f:
+password_file_path = f"/etc/hashedPasswordFile-{username}"
+with open(f"/mnt{password_file_path}", "w") as f:
   f.write(hashed_password)
-os.chmod(password_file_path, 600)
+os.chmod(f"/mnt{password_file_path}", 600)
 
 # We do our best here to match against the commented out users block.
 config = re.sub(r" *# Define a user account\..*\n( *# .*\n)+", "\n".join([
@@ -250,7 +254,7 @@ config = re.sub(r" *# Define a user account\..*\n( *# .*\n)+", "\n".join([
   f"  users.users.{username} = {{",
   "    isNormalUser = true;",
   "    extraGroups = [ \"wheel\" \"networkmanager\" ];",
-  f"    passwordFile = \"/etc/passwordFile-{username}\";",
+  f"    hashedPasswordFile = \"{password_file_path}\";",
   "  };",
   "",
   "  # Disable password-based login for root.",
